@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>WarungPintar — Kasir Warung Pakai Suara</title>
+<meta name="description" content="Kasir warung kecil: catat jualan dan bon pelanggan pakai suara. Prototipe AI VIBEATHON 2026.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="row">
+    <svg class="logo" viewBox="0 0 48 48" aria-hidden="true"><rect x="2" y="18" width="44" height="26" rx="4" fill="#FFF7ED"/><path d="M4 18 L24 6 L44 18 Z" fill="#7C2D12"/><rect x="10" y="26" width="10" height="8" rx="1.5" fill="#C2410C"/><rect x="28" y="26" width="10" height="8" rx="1.5" fill="#2F6B3A"/><rect x="20" y="34" width="8" height="10" fill="#7C2D12"/></svg>
+    <div>
+      <h1>WarungPintar</h1>
+      <p>Kasir warung &amp; bon pelanggan — pakai suara</p>
+    </div>
+    <span class="ai-badge" id="aiBadge" title="Status layanan AI"><span class="ai-dot" id="aiDot"></span><span id="aiText">AI: cek…</span></span>
+  </div>
+</header>
+
+<main>
+  <!-- ============ TAB KASIR ============ -->
+  <section class="tab active" id="tab-kasir">
+    <div class="card">
+      <h2>🎙️ Catat pakai suara</h2>
+      <p class="sub">Ngomong aja, misal: <b>“Bu Euis bon SusuQ dua”</b> atau <b>“tiga indomie goreng tunai”</b>. WarungPintar yang uraikan jadi transaksi.</p>
+      <div class="voice-row">
+        <button class="mic-btn" id="micBtn" aria-label="Rekam suara">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 19v3"/></svg>
+        </button>
+        <p class="voice-hint" id="voiceHint"><b>Ketuk mikrofon</b>, lalu bicara. Atau ketik kalimatnya di bawah ini — bisa juga tanpa mikrofon.</p>
+      </div>
+      <div class="transcript" id="transcript"><span class="ph">Hasil ucapan / kalimat akan muncul di sini…</span></div>
+      <div class="say-row">
+        <input id="sayInput" type="text" placeholder="Ketik di sini, misal: Pak Darman bon beras satu kilo" autocomplete="off">
+        <button class="btn secondary" id="parseLocalBtn" type="button">Uraikan</button>
+        <button class="btn" id="parseAiBtn" type="button">Parse pakai AI</button>
+      </div>
+      <div id="previewBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>🧺 Katalog warung</h2>
+      <p class="sub">Ketuk produk untuk masuk keranjang. Ketuk <b>✎ harga</b> untuk mengubah harga, atau tambah produk sendiri.</p>
+      <div class="grid" id="productGrid"></div>
+      <div class="btnrow" style="margin-top:12px">
+        <button class="btn ghost small" id="editPriceBtn" type="button">✎ Ubah harga</button>
+        <button class="btn ghost small" id="addProductBtn" type="button">+ Tambah produk</button>
+      </div>
+      <div id="addProductForm" class="hidden" style="margin-top:10px">
+        <div class="field" style="margin-bottom:8px"><label>Nama produk</label><input id="newProdName" type="text" placeholder="misal: Es Teh Jumbo"></div>
+        <div class="field" style="margin-bottom:8px"><label>Harga (Rp)</label><input id="newProdPrice" type="number" min="0" step="500" placeholder="5000"></div>
+        <div class="btnrow"><button class="btn small" id="saveProductBtn" type="button">Simpan produk</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🧾 Keranjang</h2>
+      <div id="cartBox"><p class="cart-empty">Keranjang masih kosong. Ketuk produk di atas, atau pakai suara.</p></div>
+      <div class="pay-toggle" id="payToggle">
+        <button type="button" data-pay="tunai" class="sel-tunai">💵 Tunai</button>
+        <button type="button" data-pay="bon">📒 Bon (utang)</button>
+      </div>
+      <div class="field" id="customerField" style="margin-bottom:12px">
+        <label>Nama pelanggan <span id="custReq" class="hidden" style="color:var(--red)">— wajib diisi untuk Bon</span></label>
+        <input id="customerInput" type="text" list="customerList" placeholder="misal: Bu Euis" autocomplete="off">
+        <datalist id="customerList"></datalist>
+      </div>
+      <div class="btnrow">
+        <button class="btn green" id="checkoutBtn" type="button">Simpan Transaksi</button>
+        <button class="btn ghost" id="clearCartBtn" type="button">Kosongkan</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TAB BON ============ -->
+  <section class="tab" id="tab-bon">
+    <div class="card">
+      <h2>📒 Bon pelanggan</h2>
+      <p class="sub">Utang pelanggan yang belum lunas. Ketuk <b>Lunas</b> kalau sudah dibayar penuh, atau isi nominal untuk bayar sebagian.</p>
+      <div id="debtList"></div>
+    </div>
+    <div class="card">
+      <h2>🕘 Riwayat pembayaran bon</h2>
+      <div id="payHistory" class="hist"></div>
+    </div>
+  </section>
+
+  <!-- ============ TAB RINGKASAN ============ -->
+  <section class="tab" id="tab-ringkasan">
+    <div class="card">
+      <h2>📊 Ringkasan hari ini</h2>
+      <p class="sub" id="todayLabel"></p>
+      <div class="stats">
+        <div class="stat"><div class="v" id="statRevenue">Rp 0</div><div class="l">Omzet hari ini</div></div>
+        <div class="stat"><div class="v green" id="statCash">Rp 0</div><div class="l">Tunai</div></div>
+        <div class="stat"><div class="v red" id="statBon">Rp 0</div><div class="l">Bon hari ini</div></div>
+        <div class="stat"><div class="v" id="statCount">0</div><div class="l">Transaksi</div></div>
+        <div class="stat"><div class="v red" id="statDebt">Rp 0</div><div class="l">Total bon belum lunas</div></div>
+        <div class="stat"><div class="v" id="statTop">—</div><div class="l">Paling laris hari ini</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>🕘 Transaksi terakhir</h2>
+      <div id="txHistory" class="hist"></div>
+    </div>
+    <div class="card">
+      <h2>⚙️ Data demo</h2>
+      <p class="sub">Untuk mencoba aplikasi tanpa mengisi manual: isi dengan contoh transaksi warung, atau hapus semua data.</p>
+      <div class="btnrow">
+        <button class="btn secondary small" id="seedBtn" type="button">Isi data contoh</button>
+        <button class="btn ghost small" id="resetBtn" type="button">Hapus semua data</button>
+      </div>
+    </div>
+  </section>
+
+  <footer class="note">WarungPintar — prototipe untuk AI VIBEATHON 2026 (PromptWars × Echo Engineers). Data tersimpan di perangkat ini (localStorage). Suara diproses di browser; Parse AI memakai Gemini lewat server sendiri.</footer>
+</main>
+
+<nav class="bottom">
+  <div class="wrap">
+    <button type="button" data-tab="kasir" class="active"><span class="ic">🧺</span>Kasir</button>
+    <button type="button" data-tab="bon"><span class="ic">📒</span>Bon <span class="bdg hidden" id="bonBadge">0</span></button>
+    <button type="button" data-tab="ringkasan"><span class="ic">📊</span>Ringkasan</button>
+  </div>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script src="parser.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
