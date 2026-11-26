@@ -108,7 +108,7 @@
       tile.className = "tile" + (editingPrice ? " editing" : "");
       if (editingPrice) {
         tile.innerHTML = '<span class="ic">' + p.icon + '</span><span class="nm"></span>' +
-          '<input class="price-edit" type="number" min="0" step="500" value="' + p.price + '" aria-label="Harga ' + p.name + '">';
+          '<input class="price-edit" type="number" min="0" step="500" value="' + p.price + '" aria-label="Harga ' + escAttr(p.name) + '">';
         tile.querySelector(".nm").textContent = p.name;
         tile.querySelector("input").addEventListener("change", function (e) {
           var v = parseInt(e.target.value, 10);
@@ -383,7 +383,7 @@
         var card = document.createElement("div");
         card.className = "debt-card";
         var itemsHtml = c.txs.map(function (tx) {
-          return "<li>" + timeStr(tx.ts) + " — " + tx.items.map(function (it) { return it.name + " ×" + it.qty; }).join(", ") + " (" + fmt(tx.total) + ")</li>";
+          return "<li>" + timeStr(tx.ts) + " — " + tx.items.map(function (it) { return esc(it.name) + " ×" + it.qty; }).join(", ") + " (" + fmt(tx.total) + ")</li>";
         }).join("");
         card.innerHTML = '<div class="top"><span class="who"></span><span class="amt">' + fmt(c.debt) + '</span></div><ul>' + itemsHtml + '</ul>' +
           '<div class="pay-row"><input type="number" min="0" step="1000" placeholder="Nominal bayar (Rp)" aria-label="Nominal bayar">' +
@@ -439,7 +439,7 @@
       hist.innerHTML = state.txs.slice(0, 15).map(function (tx) {
         var tag = tx.payment === "bon" ? '<span class="tag bon">BON</span>' : '<span class="tag tunai">TUNAI</span>';
         var who = tx.customer ? " — <b>" + esc(tx.customer) + "</b>" : "";
-        return '<div class="h-line"><span>' + tag + who + '<small>' + timeStr(tx.ts) + " · " + tx.items.map(function (it) { return it.name + " ×" + it.qty; }).join(", ") + '</small></span><b>' + fmt(tx.total) + "</b></div>";
+        return '<div class="h-line"><span>' + tag + who + '<small>' + timeStr(tx.ts) + " · " + tx.items.map(function (it) { return esc(it.name) + " ×" + it.qty; }).join(", ") + '</small></span><b>' + fmt(tx.total) + "</b></div>";
       }).join("");
     }
   }
