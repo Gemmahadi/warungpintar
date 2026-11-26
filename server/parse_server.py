@@ -8,12 +8,19 @@ GET  /api/health -> {"ok": true}
 The Gemini API key comes ONLY from the GEMINI_API_KEY environment variable.
 It is never hardcoded, never printed, never written to disk by this server.
 Run:  GEMINI_API_KEY=... python3 parse_server.py   (PORT env, default 8901)
+
+Hardening (attempt 2, 26 Nov 2026): security headers on every response,
+request-body size limit, strict JSON/shape validation, per-IP rate limit
+on /api/parse. No request body or error detail ever contains the API key.
 """
 import json
 import os
 import re
+import threading
+import time
 import urllib.request
 import urllib.error
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 GEMINI_MODEL = "gemini-2.5-flash"
@@ -23,6 +30,37 @@ GEMINI_URL = (
     + ":generateContent"
 )
 TIMEOUT_S = 20
+
+# --- hardening limits ---
+MAX_BODY_BYTES = 8192          # reject anything bigger before reading it
+MAX_TEXT_CHARS = 500           # one spoken sentence; more is abuse, not a parse
+MAX_PRODUCTS = 64
+MAX_PRODUCT_CHARS = 64
+RATE_LIMIT_PER_MIN = 30        # POST /api/parse per client IP, sliding window
+RATE_WINDOW_S = 60
+
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+}
+
+_rate_lock = threading.Lock()
+_rate_hits = {}  # ip -> deque[timestamps]
+
+
+def _rate_limited(ip):
+    """True if this IP already used its per-minute budget on /api/parse."""
+    now = time.monotonic()
+    with _rate_lock:
+        hits = _rate_hits.setdefault(ip, deque())
+        while hits and hits[0] <= now - RATE_WINDOW_S:
+            hits.popleft()
+        if len(hits) >= RATE_LIMIT_PER_MIN:
+            return True
+        hits.append(now)
+        return False
 
 DEFAULT_PRODUCTS = [
     "Kopi Hitam", "Teh Manis", "Indomie Goreng", "Indomie Kuah", "Aqua 600ml",
@@ -124,17 +162,40 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # keep logs quiet; never log bodies/keys
         pass
 
-    def _send(self, status, payload):
+    def _route(self):
+        """Path as the backend should see it.
+
+        nginx `location /warungpintar/api/ { proxy_pass ...:8905/; }` strips
+        the matched prefix, so the public /warungpintar/api/health arrives
+        here as /health. Accept /api/health, /health and
+        /warungpintar/api/health alike.
+        """
+        p = self.path.split("?", 1)[0]
+        for prefix in ("/warungpintar/api", "/api", "/warungpintar"):
+            if p == prefix:
+                return "/"
+            if p.startswith(prefix + "/"):
+                return p[len(prefix):]
+        return p
+
+    def _send(self, status, payload, extra=None):
         data = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
+        for k, v in _SECURITY_HEADERS.items():
+            self.send_header(k, v)
         self.send_header("Access-Control-Allow-Origin", "*")
+        if extra:
+            for k, v in extra.items():
+                self.send_header(k, v)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
 
     def do_OPTIONS(self):
         self.send_response(204)
+        for k, v in _SECURITY_HEADERS.items():
+            self.send_header(k, v)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -142,32 +203,59 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        if self.path == "/api/health":
+        if self._route() == "/health":
             self._send(200, {"ok": True})
         else:
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
-        if self.path != "/api/parse":
+        if self._route() != "/parse":
             self._send(404, {"error": "not found"})
+            return
+        if _rate_limited(self.client_address[0]):
+            # Body not read yet: close the connection so unread bytes cannot
+            # corrupt the next request on a reused keep-alive socket.
+            self.close_connection = True
+            self._send(429, {"error": "rate limited, try again later"},
+                       extra={"Retry-After": "60"})
             return
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             self._send(400, {"error": "bad Content-Length"})
             return
+        if length <= 0:
+            self._send(400, {"error": "empty body"})
+            return
+        if length > MAX_BODY_BYTES:
+            # Do not read the body; close the connection so its unread bytes
+            # cannot corrupt the next request on a reused keep-alive socket.
+            self.close_connection = True
+            self._send(413, {"error": "request body too large"})
+            return
         try:
             body = json.loads(self.rfile.read(length).decode("utf-8"))
         except Exception:
             self._send(400, {"error": "invalid JSON body"})
             return
-        text = (body.get("text") or "").strip()
-        if not text:
+        if not isinstance(body, dict):
+            self._send(400, {"error": "body must be a JSON object"})
+            return
+        text = body.get("text")
+        if not isinstance(text, str) or not text.strip():
             self._send(400, {"error": "text is empty"})
             return
+        text = text.strip()
+        if len(text) > MAX_TEXT_CHARS:
+            self._send(400, {"error": "text too long"})
+            return
         products = body.get("products") or DEFAULT_PRODUCTS
-        if not isinstance(products, list) or not products:
-            products = DEFAULT_PRODUCTS
+        if (not isinstance(products, list) or not products
+                or len(products) > MAX_PRODUCTS
+                or any(not isinstance(p, str) or not p.strip()
+                       or len(p) > MAX_PRODUCT_CHARS for p in products)):
+            self._send(400, {"error": "invalid products list"})
+            return
         api_key = os.environ.get("GEMINI_API_KEY", "").strip()
         if not api_key:
             self._send(502, {"error": "server has no GEMINI_API_KEY configured"})
